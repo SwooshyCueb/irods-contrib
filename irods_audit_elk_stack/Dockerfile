@@ -3,52 +3,233 @@
 #
 # Used in iRODS Training
 #
-FROM ubuntu:latest
-MAINTAINER Justin James "jjames@renci.org"
+FROM ubuntu:20.04
 
-RUN apt-get update
-RUN apt-get remove --purge openjdk-11-jre
-RUN apt-get remove --purge openjdk-11-jre-headless
-RUN apt-get install -y openjdk-8-jre-headless
-RUN update-java-alternatives --set /usr/lib/jvm/java-1.8.0-openjdk-amd64
-RUN export JAVA_HOME=$(readlink -f /usr/bin/java | sed "s:bin/java::")
-RUN apt-get install -y gnupg curl
-RUN apt-get install -y wget
+SHELL [ "/bin/bash", "-c" ]
+ENV DEBIAN_FRONTEND=noninteractive
 
-RUN wget -qO - https://artifacts.elastic.co/GPG-KEY-elasticsearch | apt-key add -
-RUN apt-get -y install apt-transport-https
-RUN echo "deb https://artifacts.elastic.co/packages/6.x/apt stable main" | tee -a /etc/apt/sources.list.d/elastic-6.x.list
-RUN apt-get update && apt-get -y install elasticsearch
-#curl http://localhost:9200
-#RUN curl -XPUT 'http://localhost:9200/irods_audit'
-RUN apt-get -y install logstash
-RUN /usr/share/logstash/bin/logstash-plugin install logstash-input-stomp
+# Make sure we're starting with an up-to-date image
+RUN apt-get update && \
+    apt-get upgrade -y && \
+    apt-get autoremove -y --purge && \
+    apt-get clean && \
+    rm -rf /var/lib/apt/lists/* /tmp/*
+# To mark all installed packages as manually installed:
+#apt-mark showauto | xargs -r apt-mark manual
 
-RUN printf 'input {\n    # Read the audit_messages queue messages using the stomp protocol.\n    #stomp {\n    #    host        => "localhost"\n    #    destination => "/queue/audit_messages"\n    #    codec       => plain {\n    #                       charset => "ISO-8859-1"\n    #                   }\n    #}\n\n    rabbitmq {\n      host => "localhost"\n      queue => "audit_messages"\n    }\n}\n\nfilter {\n\n    # Remove AMQP header and footer information from message\n    #ruby {\n    #    code => "event.set('message', event.get('message').sub(/.*__BEGIN_JSON__/, ''))\n    #             event.set('message', event.get('message').sub(/__END_JSON__.*/, ''))"\n    #}\n\n    if "_jsonparsefailure" in [tags] {\n        mutate {\n                  gsub => [ "message", "[\\\\]","" ]\n                  gsub => [ "message", ".*__BEGIN_JSON__", ""]\n                  gsub => [ "message", "__END_JSON__", ""]\n\n        } \n        mutate { remove_tag => [ "tags", "_jsonparsefailure" ] }\n        json { source => "message" }\n\n    }\n\n    # Parse the JSON message\n    json {\n        source       => "message"\n        remove_field => ["message"]\n    }\n\n    # Replace @timestamp with the timestamp stored in time_stamp\n    date {\n        match => [ "time_stamp", "UNIX_MS" ]\n    }\n\n    # Convert select fields to integer\n    mutate {\n        convert => { "int" => "integer" }\n        convert => { "int__2" => "integer" }\n        convert => { "int__3" => "integer" }\n        convert => { "file_size" => "integer" }\n    }\n\n}\n\noutput {\n    # Write the output to elastic search under the irods_audit index.\n    elasticsearch {\n        hosts => ["localhost:9200"]\n        index => "irods_audit"\n    }\n    #stdout {\n    #    codec => rubydebug {}\n    #}\n}\n' > /etc/logstash/conf.d/irods_audit.conf
+RUN apt-get update && \
+    apt-get install -y \
+        software-properties-common \
+        debian-archive-keyring \
+        apt-transport-https \
+        gnupg \
+        curl \
+    && \
+    apt-get clean && \
+    rm -rf /var/lib/apt/lists/* /tmp/*
 
-#/usr/share/logstash/bin/logstash&
-RUN curl -s https://packagecloud.io/install/repositories/rabbitmq/rabbitmq-server/script.deb.sh |  bash
-RUN wget https://packages.erlang-solutions.com/erlang-solutions_1.0_all.deb
-RUN apt-get update
-RUN apt-get -y install erlang
-RUN apt-get -y install rabbitmq-server
-RUN rabbitmq-plugins enable rabbitmq_amqp1_0
-RUN rabbitmq-plugins enable rabbitmq_management
+ADD https://packages.adoptium.net/artifactory/api/gpg/key/public /usr/share/keyrings/adoptium.asc
+ADD https://adoptopenjdk.jfrog.io/adoptopenjdk/api/gpg/key/public /usr/share/keyrings/adoptopenjdk.asc
+RUN gpg --dearmor -o /usr/share/keyrings/adoptium.gpg /usr/share/keyrings/adoptium.asc && \
+    gpg --dearmor -o /usr/share/keyrings/adoptopenjdk.gpg /usr/share/keyrings/adoptopenjdk.asc && \
+    echo "deb [signed-by=/usr/share/keyrings/adoptium.gpg] https://packages.adoptium.net/artifactory/deb $(awk -F= '/^VERSION_CODENAME/{print$2}' /etc/os-release) main" | tee /etc/apt/sources.list.d/adoptium.list && \
+    echo "deb [signed-by=/usr/share/keyrings/adoptopenjdk.gpg] https://adoptopenjdk.jfrog.io/adoptopenjdk/deb/ $(awk -F= '/^VERSION_CODENAME/{print$2}' /etc/os-release) main" | tee /etc/apt/sources.list.d/adoptopenjdk.list && \
+    apt-get update && \
+    apt-get install -y \
+        adoptium-ca-certificates \
+    && \
+    apt-get clean && \
+    rm -rf /var/lib/apt/lists/* /tmp/*
 
-RUN apt-get -y install kibana
+#ARG java_ver=8
+#ARG java_ver=11
+#ARG java_vendor=adoptopenjdk
+#ARG java_dist=hotspot-jre
+ARG java_ver=17
+ARG java_vendor=temurin
+ARG java_dist=jdk
+
+RUN apt-get update && \
+    apt-get install -y \
+        ${java_vendor}-${java_ver}-${java_dist} \
+    && \
+    apt-get clean && \
+    rm -rf /var/lib/apt/lists/* /tmp/*
+ENV JAVA_HOME=/usr/lib/jvm/${java_vendor}-${java_ver}-${java_dist}-amd64
+RUN update-java-alternatives --set ${JAVA_HOME}
+ENV ES_JAVA_HOME=${JAVA_HOME}
+ENV LS_JAVA_HOME=${JAVA_HOME}
+
+#ARG es_ver=6
+#ARG es_ver=7
+ARG es_ver=8
+ADD https://artifacts.elastic.co/GPG-KEY-elasticsearch /usr/share/keyrings/elasticsearch-keyring.asc
+RUN gpg --dearmor -o /usr/share/keyrings/elasticsearch-keyring.gpg /usr/share/keyrings/elasticsearch-keyring.asc && \
+    echo "deb [signed-by=/usr/share/keyrings/elasticsearch-keyring.gpg] https://artifacts.elastic.co/packages/${es_ver}.x/apt stable main" | tee /etc/apt/sources.list.d/elastic-${es_ver}.x.list
+
+RUN apt-get update && \
+    apt-get install -y \
+        elasticsearch \
+        logstash \
+    && \
+    apt-get clean && \
+    rm -rf /var/lib/apt/lists/* /tmp/*
+
+#RUN /usr/share/logstash/bin/logstash-plugin install logstash-input-stomp
+
+COPY logstash-irods_audit.conf /etc/logstash/conf.d/irods_audit.conf
+
+RUN echo "ES_JAVA_HOME=\"${ES_JAVA_HOME}\"" >> /etc/default/elasticsearch && \
+    echo "LS_JAVA_HOME=\"${LS_JAVA_HOME}\"" >> /etc/default/logstash
+
+ADD https://packagecloud.io/rabbitmq/rabbitmq-server/gpgkey /usr/share/keyrings/rabbitmq_rabbitmq-server.asc
+RUN add-apt-repository --no-update -y ppa:rabbitmq/rabbitmq-erlang && \
+    gpg --dearmor -o /usr/share/keyrings/rabbitmq_rabbitmq-server.gpg /usr/share/keyrings/rabbitmq_rabbitmq-server.asc && \
+    echo "deb [signed-by=/usr/share/keyrings/rabbitmq_rabbitmq-server.gpg] https://packagecloud.io/rabbitmq/rabbitmq-server/ubuntu/ $(awk -F= '/^VERSION_CODENAME/{print$2}' /etc/os-release) main" | tee /etc/apt/sources.list.d/rabbitmq_rabbitmq-server.list && \
+    apt-get clean && \
+    rm -rf /var/lib/apt/lists/* /tmp/*
+
+ADD https://packages.erlang-solutions.com/ubuntu/erlang_solutions.asc /usr/share/keyrings/erlang_solutions.asc
+#RUN gpg --dearmor -o /usr/share/keyrings/erlang_solutions.gpg /usr/share/keyrings/erlang_solutions.asc && \
+#    echo "deb [signed-by=/usr/share/keyrings/erlang_solutions.gpg] https://packages.erlang-solutions.com/ubuntu $(awk -F= '/^VERSION_CODENAME/{print$2}' /etc/os-release) contrib" | tee /etc/apt/sources.list.d/erlang-solutions.list
+RUN gpg --dearmor -o /usr/share/keyrings/erlang_solutions.gpg /usr/share/keyrings/erlang_solutions.asc && \
+    echo "deb [signed-by=/usr/share/keyrings/erlang_solutions.gpg] http://binaries.erlang-solutions.com/debian $(awk -F= '/^VERSION_CODENAME/{print$2}' /etc/os-release) contrib" | tee /etc/apt/sources.list.d/erlang-solutions.list
+
+RUN apt-get update && \
+    apt-get install -y \
+        rabbitmq-server \
+    && \
+    apt-get clean && \
+    rm -rf /var/lib/apt/lists/* /tmp/*
+
+RUN rabbitmq-plugins enable rabbitmq_amqp1_0 && \
+    rabbitmq-plugins enable rabbitmq_management
+
+RUN apt-get update && \
+    apt-get install -y \
+        kibana \
+    && \
+    apt-get clean && \
+    rm -rf /var/lib/apt/lists/* /tmp/*
+
 RUN echo "server.host: \"0.0.0.0\"" >> /etc/kibana/kibana.yml
 
-RUN echo "transport.host: localhost" >> /etc/elasticsearch/elasticsearch.yml
-RUN echo "transport.tcp.port: 9300" >> /etc/elasticsearch/elasticsearch.yml
-RUN echo "http.port: 9200" >> /etc/elasticsearch/elasticsearch.yml
-RUN echo "network.host: 0.0.0.0" >> /etc/elasticsearch/elasticsearch.yml
+COPY elasticsearch.yml /etc/elasticsearch/elasticsearch.yml
+RUN /usr/share/elasticsearch/bin/elasticsearch-keystore remove \
+        xpack.security.http.ssl.keystore.secure_password \
+        xpack.security.transport.ssl.keystore.secure_password \
+        xpack.security.transport.ssl.truststore.secure_password
+
+# from ubi8-init
+RUN apt-get update && \
+    apt-get install -y \
+        procps \
+    && \
+    apt-get clean && \
+    rm -rf /var/lib/apt/lists/* /tmp/*
+
+# utils
+RUN apt-get update && \
+    apt-get install -y \
+        nano \
+        less \
+        iproute2 \
+    && \
+    apt-get clean && \
+    rm -rf /var/lib/apt/lists/* /tmp/*
+
+# from ubi8-init
+STOPSIGNAL SIGRTMIN+3
+
+# from ubi8-init
+RUN systemctl mask \
+        systemd-remount-fs.service \
+        dev-hugepages.mount \
+        sys-fs-fuse-connections.mount \
+        systemd-logind.service \
+        getty.target \
+        console-getty.service \
+        systemd-udev-trigger.service \
+        systemd-udevd.service \
+        systemd-random-seed.service
+
+# from ubi8-init
+#mask systemd-machine-id-commit.service - partial fix for https://bugzilla.redhat.com/show_bug.cgi?id=1472439
+RUN systemctl mask systemd-machine-id-commit.service
+
+RUN systemctl mask \
+        unattended-upgrades.service \
+        packagekit-offline-update.service \
+        systemd-timesyncd.service \
+        systemd-resolved.service \
+        e2scrub_reap.service \
+        apt-daily-upgrade.service \
+        apt-daily-upgrade.timer \
+        apt-daily.service \
+        apt-daily.timer \
+        e2scrub_all.service \
+        e2scrub_all.timer \
+        ondemand.service \
+        systemd-modules-load.service \
+        fstrim.service \
+        fstrim.timer
+
+#RUN systemctl mask \
+#        remote-fs.target \
+#        systemd-pstore.service \
+#        cryptsetup.target
+
+RUN systemctl mask \
+        getty-static.service \
+        networkd-dispatcher.service
+
+#RUN systemctl mask \
+#        kmod-static-nodes.service
+#        proc-sys-fs-binfmt_misc.mount \
+#        proc-sys-fs-binfmt_misc.automount \
+#        dev-mqueue.mount \
+#        sys-kernel-config.mount \
+#        sys-kernel-debug.mount \
+#        sys-kernel-tracing.mount \
+#        systemd-ask-password-console.path \
+#        systemd-binfmt.service \
+#        systemd-boot-system-token.service \
+#        systemd-sysctl.service \
+#        systemd-sysusers.service \
+#        systemd-update-utmp.service \
+#        systemd-initctl.socket \
+#        systemd-update-utmp-runlevel.service \
+#        systemd-ask-password-wall.path \
+#        systemd-user-sessions.service
+
+#RUN systemctl mask \
+#        systemd-tmpfiles-setup-dev.service \
+#        systemd-tmpfiles-setup.service \
+#        systemd-tmpfiles-clean.timer \
+#        systemd-tmpfiles-clean.service
+
+# from ubi8-init
+CMD ["/sbin/init"]
+
+RUN mkdir -p /etc/systemd/system/logstash.service.d && \
+    echo "[Unit]" >> /etc/systemd/system/logstash.service.d/elasticsearch.conf && \
+    echo "After=elasticsearch.service" >> /etc/systemd/system/logstash.service.d/elasticsearch.conf && \
+    echo "Wants=elasticsearch.service" >> /etc/systemd/system/logstash.service.d/elasticsearch.conf
+
+COPY elk-firstrun.service /etc/systemd/system/
+COPY example_kibana_dashboard.ndjson /var/lib/irods-elk/
+COPY firstrun.sh /var/lib/irods-elk/
+
+RUN systemctl enable \
+        elasticsearch \
+        logstash \
+        rabbitmq-server \
+        kibana \
+        elk-firstrun
+
+#COPY startup_script.sh /startup_script.sh
+
+#CMD /startup_script.sh
 
 
-RUN printf 'chown rabbitmq:rabbitmq /var/lib/rabbitmq/.erlang.cookie\nservice elasticsearch start\nservice logstash start\nservice rabbitmq-server start\nservice kibana start\ncurl http://localhost:9200\ncurl -XPUT "http://localhost:9200/irods_audit"\nrabbitmqctl add_user test test\nrabbitmqctl set_user_tags test administrator\nrabbitmqctl set_permissions -p / test ".*" ".*" ".*"\n/bin/bash\nsleep 20\ncurl -XPUT http://localhost:9200/irods_audit/_settings -H \'Content-Type: application/json\' -d\'{"index.mapping.total_fields.limit": 2000}\''> /startup_script.sh
-RUN chmod +x /startup_script.sh
-
-CMD /startup_script.sh
-
-
-WORKDIR /home
-
+WORKDIR /root
