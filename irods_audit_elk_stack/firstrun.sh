@@ -1,18 +1,5 @@
 #!/bin/bash
 
-if [ ! -f /var/lib/irods-elk/.firstrun_rmq_done ]; then
-	echo "<5>Performing rabbitmq first-run setup..."
-
-	rabbitmqctl add_user test test
-	rabbitmqctl set_user_tags test administrator
-	rabbitmqctl set_permissions -p / test ".*" ".*" ".*"
-
-	echo "<5>Completed rabbitmq first-run setup"
-	touch /var/lib/irods-elk/.firstrun_rmq_done
-else
-	echo "<5>Skipping rabbitmq first-run setup (already done)..."
-fi
-
 if [ ! -f /var/lib/irods-elk/.firstrun_es_done ]; then
 	echo "<5>Performing elasticsearch first-run setup..."
 
