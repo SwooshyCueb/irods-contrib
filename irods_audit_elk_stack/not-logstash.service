@@ -1,0 +1,18 @@
+[Unit]
+Description=fake logstash
+After=rabbitmq-server.service
+After=elasticsearch.service
+Requires=rabbitmq-server.service
+Requires=elasticsearch.service
+
+[Service]
+Type=simple
+User=elasticsearch
+Group=elasticsearch
+ExecStart=/var/lib/irods-elk/not-logstash.py
+Restart=always
+WorkingDirectory=/var/lib/irods-elk
+LimitNOFILE=16384
+
+[Install]
+WantedBy=multi-user.target

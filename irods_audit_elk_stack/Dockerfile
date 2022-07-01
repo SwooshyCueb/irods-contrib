@@ -24,6 +24,7 @@ RUN apt-get update && \
         curl \
     && \
     apt-get install --no-install-recommends -y \
+        software-properties-common \
         systemd \
         systemd-sysv \
         dbus \
@@ -97,6 +98,15 @@ RUN gpg --dearmor -o /usr/share/keyrings/erlang_solutions.gpg /usr/share/keyring
 RUN apt-get update && \
     apt-get install -y \
         rabbitmq-server \
+    && \
+    apt-get clean && \
+    rm -rf /var/lib/apt/lists/* /tmp/*
+
+# Hopefully these are new enough
+RUN apt-get update && \
+    apt-get install -y \
+        python3-qpid-proton \
+        python3-elasticsearch \
     && \
     apt-get clean && \
     rm -rf /var/lib/apt/lists/* /tmp/*
@@ -197,15 +207,13 @@ RUN systemctl mask \
 # from ubi8-init
 CMD ["/sbin/init"]
 
-RUN mkdir -p /etc/systemd/system/logstash.service.d && \
-    echo "[Unit]" >> /etc/systemd/system/logstash.service.d/elasticsearch.conf && \
-    echo "After=elasticsearch.service" >> /etc/systemd/system/logstash.service.d/elasticsearch.conf && \
-    echo "Wants=elasticsearch.service" >> /etc/systemd/system/logstash.service.d/elasticsearch.conf
-
 RUN mkdir -p /etc/systemd/system/kibana.service.d && \
     echo "[Unit]" >> /etc/systemd/system/kibana.service.d/elasticsearch.conf && \
     echo "After=elasticsearch.service" >> /etc/systemd/system/kibana.service.d/elasticsearch.conf && \
     echo "Wants=elasticsearch.service" >> /etc/systemd/system/kibana.service.d/elasticsearch.conf
+
+COPY not-logstash.service /etc/systemd/system/
+COPY not-logstash.py /var/lib/irods-elk/
 
 COPY elk-firstrun.service /etc/systemd/system/
 COPY example_kibana_dashboard.ndjson /var/lib/irods-elk/
@@ -215,6 +223,7 @@ RUN systemctl enable \
         elasticsearch \
         rabbitmq-server \
         kibana \
+        not-logstash \
         elk-firstrun
 
 WORKDIR /root

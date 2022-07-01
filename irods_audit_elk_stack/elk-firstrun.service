@@ -2,11 +2,9 @@
 Description=iRODS elk stack first-run setup
 After=rabbitmq-server.service
 After=elasticsearch.service
-After=logstash.service
 After=kibana.service
 Requires=rabbitmq-server.service
 Requires=elasticsearch.service
-Requires=logstash.service
 Requires=kibana.service
 
 [Service]
