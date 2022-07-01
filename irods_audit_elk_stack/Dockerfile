@@ -19,11 +19,14 @@ RUN apt-get update && \
 
 RUN apt-get update && \
     apt-get install -y \
-        software-properties-common \
-        debian-archive-keyring \
         apt-transport-https \
         gnupg \
         curl \
+    && \
+    apt-get install --no-install-recommends -y \
+        systemd \
+        systemd-sysv \
+        dbus \
     && \
     apt-get clean && \
     rm -rf /var/lib/apt/lists/* /tmp/*
@@ -58,29 +61,25 @@ RUN apt-get update && \
 ENV JAVA_HOME=/usr/lib/jvm/${java_vendor}-${java_ver}-${java_dist}-amd64
 RUN update-java-alternatives --set ${JAVA_HOME}
 ENV ES_JAVA_HOME=${JAVA_HOME}
-ENV LS_JAVA_HOME=${JAVA_HOME}
 
 #ARG es_ver=6
 #ARG es_ver=7
 ARG es_ver=8
 ADD https://artifacts.elastic.co/GPG-KEY-elasticsearch /usr/share/keyrings/elasticsearch-keyring.asc
 RUN gpg --dearmor -o /usr/share/keyrings/elasticsearch-keyring.gpg /usr/share/keyrings/elasticsearch-keyring.asc && \
-    echo "deb [signed-by=/usr/share/keyrings/elasticsearch-keyring.gpg] https://artifacts.elastic.co/packages/${es_ver}.x/apt stable main" | tee /etc/apt/sources.list.d/elastic-${es_ver}.x.list
+    echo "deb [signed-by=/usr/share/keyrings/elasticsearch-keyring.gpg] https://artifacts.elastic.co/packages/${es_ver}.x/apt stable main" | tee /etc/apt/sources.list.d/elastic-${es_ver}.x.list && \
+    echo 'path-exclude=/usr/share/elasticsearch/jdk' >> /etc/dpkg/dpkg.cfg.d/excludes-elasticsearch-jvm && \
+    echo 'path-exclude=/usr/share/elasticsearch/jdk/*' >> /etc/dpkg/dpkg.cfg.d/excludes-elasticsearch-jvm
 
 RUN apt-get update && \
     apt-get install -y \
         elasticsearch \
-        logstash \
+        kibana \
     && \
     apt-get clean && \
     rm -rf /var/lib/apt/lists/* /tmp/*
 
-#RUN /usr/share/logstash/bin/logstash-plugin install logstash-input-stomp
-
-COPY logstash-irods_audit.conf /etc/logstash/conf.d/irods_audit.conf
-
-RUN echo "ES_JAVA_HOME=\"${ES_JAVA_HOME}\"" >> /etc/default/elasticsearch && \
-    echo "LS_JAVA_HOME=\"${LS_JAVA_HOME}\"" >> /etc/default/logstash
+RUN echo "ES_JAVA_HOME=\"${ES_JAVA_HOME}\"" >> /etc/default/elasticsearch
 
 ADD https://packagecloud.io/rabbitmq/rabbitmq-server/gpgkey /usr/share/keyrings/rabbitmq_rabbitmq-server.asc
 RUN add-apt-repository --no-update -y ppa:rabbitmq/rabbitmq-erlang && \
@@ -105,13 +104,6 @@ RUN apt-get update && \
 RUN rabbitmq-plugins enable rabbitmq_amqp1_0 && \
     rabbitmq-plugins enable rabbitmq_management
 
-RUN apt-get update && \
-    apt-get install -y \
-        kibana \
-    && \
-    apt-get clean && \
-    rm -rf /var/lib/apt/lists/* /tmp/*
-
 RUN echo "server.host: \"0.0.0.0\"" >> /etc/kibana/kibana.yml
 
 COPY elasticsearch.yml /etc/elasticsearch/elasticsearch.yml
@@ -120,20 +112,14 @@ RUN /usr/share/elasticsearch/bin/elasticsearch-keystore remove \
         xpack.security.transport.ssl.keystore.secure_password \
         xpack.security.transport.ssl.truststore.secure_password
 
-# from ubi8-init
-RUN apt-get update && \
-    apt-get install -y \
-        procps \
-    && \
-    apt-get clean && \
-    rm -rf /var/lib/apt/lists/* /tmp/*
-
 # utils
 RUN apt-get update && \
     apt-get install -y \
+        procps \
         nano \
         less \
         iproute2 \
+        file \
     && \
     apt-get clean && \
     rm -rf /var/lib/apt/lists/* /tmp/*
@@ -162,11 +148,11 @@ RUN systemctl mask \
         packagekit-offline-update.service \
         systemd-timesyncd.service \
         systemd-resolved.service \
-        e2scrub_reap.service \
         apt-daily-upgrade.service \
         apt-daily-upgrade.timer \
         apt-daily.service \
         apt-daily.timer \
+        e2scrub_reap.service \
         e2scrub_all.service \
         e2scrub_all.timer \
         ondemand.service \
@@ -216,20 +202,19 @@ RUN mkdir -p /etc/systemd/system/logstash.service.d && \
     echo "After=elasticsearch.service" >> /etc/systemd/system/logstash.service.d/elasticsearch.conf && \
     echo "Wants=elasticsearch.service" >> /etc/systemd/system/logstash.service.d/elasticsearch.conf
 
+RUN mkdir -p /etc/systemd/system/kibana.service.d && \
+    echo "[Unit]" >> /etc/systemd/system/kibana.service.d/elasticsearch.conf && \
+    echo "After=elasticsearch.service" >> /etc/systemd/system/kibana.service.d/elasticsearch.conf && \
+    echo "Wants=elasticsearch.service" >> /etc/systemd/system/kibana.service.d/elasticsearch.conf
+
 COPY elk-firstrun.service /etc/systemd/system/
 COPY example_kibana_dashboard.ndjson /var/lib/irods-elk/
 COPY firstrun.sh /var/lib/irods-elk/
 
 RUN systemctl enable \
         elasticsearch \
-        logstash \
         rabbitmq-server \
         kibana \
         elk-firstrun
-
-#COPY startup_script.sh /startup_script.sh
-
-#CMD /startup_script.sh
-
 
 WORKDIR /root
