@@ -46,15 +46,12 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
     rm -rf /tmp/*
 
 # Install JDK/JRE
-COPY java-excludes.dpkg.cfg /etc/dpkg/dpkg.cfg.d/java-excludes
+COPY java/java-excludes.dpkg.cfg /etc/dpkg/dpkg.cfg.d/java-excludes
 RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
     --mount=type=cache,target=/var/lib/apt,sharing=locked \
-    apt-get update && \
-    apt-get install --no-install-recommends -y \
-        openjdk-17-jre-headless \
-    && \
-    rm -rf /tmp/*
-ENV JAVA_HOME=/usr/lib/jvm/java-17-openjdk-amd64
+    --mount=type=bind,target=/image_setup \
+    /image_setup/java/install-graalvm.sh
+ENV JAVA_HOME=/usr/lib/jvm/graalvm-17-jdk-amd64
 ENV ES_JAVA_HOME=${JAVA_HOME}
 
 # Install Elasticsearch and Kibana
